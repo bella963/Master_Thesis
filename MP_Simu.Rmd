@@ -1,0 +1,1863 @@
+---
+title: "Simulation"
+author: "Bella Shao"
+date: "5/7/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(FMradio)
+library(MASS)
+
+
+library(ggplot2)
+library(tidyr)
+library(dplyr)
+library(ggpubr)
+library(forcats)
+library(EFA.dimensions)
+library(psych)
+library(datamicroarray)
+
+require("Biobase")
+require("rags2ridges")
+require("DandEFA")
+require("randomForestSRC")
+require("pec")
+require("survival")
+```
+
+
+```{r}
+rm(list = ls())
+```
+
+## FAsim data simulation 
+```{r}
+?FMradio
+```
+
+```{r}
+FAsim_new <- function(p, m, n, simplestructure = TRUE, balanced = TRUE,
+                      correlated = TRUE, corr = 0.5,
+                  loadingfix = TRUE, loadingnegative = TRUE,
+                  loadingvalue = .8, loadingvaluelow = .2, numloadings,
+                  loadinglowerH = .7, loadingupperH = .9, 
+                  loadinglowerL = .1, loadingupperL = .3){
+  ##############################################################################
+  # Simulate data according to the factor analytic model
+  # - p               > feature dimension
+  # - m               > dimension of latent vector
+  # - n               > number of samples
+  # - simplestructure > logical indicating if factor structure should be 
+  #                     factorially pure
+  # - balanced        > logical indicating if the 'significant' loadings
+  #                     should be divided evenly over the respective factors
+  # - loadingfix      > logical indicating if the loadings should have a 
+  #                     fixed value
+  # - loadingnegative > logical indicating if, next to positive, also negative
+  #                     loadings should be present
+  # - loadingvalue    > value for high loadings, used when loadingfix = TRUE
+  # - loadingvaluelow > value for low loadings, used when loadingfix = TRUE &
+  #                     simplestructure = FALSE
+  # - numloadings     > vector with length equalling argument m, indicating the
+  #                     number of 'significant' loadings per factor. Used when
+  #                     balanced = FALSE
+  # - loadinglowerH   > lower-bound of 'significant' (high) loadings, used when 
+  #                     loadingfix = FALSE
+  # - loadingupperH   > upper-bound of 'significant' (high) loadings, used when 
+  #                     loadingfix = FALSE
+  # - loadinglowerL   > lower-bound of 'non-significant' (low) loadings, used 
+  #                     when loadingfix = FALSE & simplestructure = FALSE
+  # - loadingupperL   > upper-bound of 'non-significant' (low) loadings, used 
+  #                     when loadingfix = FALSE & simplestructure = FALSE
+  #
+  # NOTES:
+  # - Produces a standardized data matrix of size n x p
+  # - Also output the correlation matrix based on the generated data and the
+  #   loadings matrix and uniquenesses vector on which the data-generation was 
+  #   based
+  # - A uniform distribution is assumed when generating draws between 
+  #   loadinglowerH and loadingupperH
+  # - A uniform distribution is assumed when generating draws between 
+  #   loadinglowerL and loadingupperL
+  ##############################################################################  
+  
+  # Dependencies:
+  # require("base")
+  # require("stats")
+  # require("MASS")
+  
+  # Checks
+  if (class(p) != "numeric" & class(p) != "integer"){ 
+    stop("Input (p) is of wrong class") 
+  }
+  if (p <=  1){ 
+    stop("Input (p) should be at least 2") 
+  }
+  if (length(p) != 1){
+    stop("Length input (p) must be one")
+  }
+  if (class(m) != "numeric" & class(m) != "integer"){ 
+    stop("Input (m) is of wrong class") 
+  }
+  if (m <=  0){ 
+    stop("Input (m) should be strictly positive") 
+  }
+  if (length(m) != 1){
+    stop("Length input (m) must be one")
+  }
+  mmax <- floor((2*p + 1 - sqrt(8*p + 1))/2)
+  if (m > mmax){
+    stop("Input (m) is too high")
+  }
+  if (class(n) != "numeric" & class(n) != "integer"){ 
+    stop("Input (n) is of wrong class") 
+  }
+  if (n <=  1){ 
+    stop("Input (n) should be at least 2") 
+  }
+  if (length(n) != 1){
+    stop("Length input (n) must be one")
+  }
+  if (class(simplestructure) != "logical"){ 
+    stop("Input (simplestructure) is of wrong class") 
+  }
+  if (class(balanced) != "logical"){ 
+    stop("Input (balanced) is of wrong class") 
+  }
+  if (class(loadingfix) != "logical"){ 
+    stop("Input (loadingfix) is of wrong class") 
+  }
+  if (class(loadingnegative) != "logical"){ 
+    stop("Input (loadingnegative) is of wrong class") 
+  }
+  
+  # Conditional checks
+  if (loadingfix){
+    if (class(loadingvalue) != "numeric"){ 
+      stop("Input (loadingvalue) is of wrong class") 
+    }
+    if (length(loadingvalue) != 1){ 
+      stop("Length input (loadingvalue) must be one") 
+    }
+    if (class(loadingvaluelow) != "numeric"){ 
+      stop("Input (loadingvaluelow) is of wrong class") 
+    }
+    if (length(loadingvaluelow) != 1){ 
+      stop("Length input (loadingvaluelow) must be one") 
+    }
+  }
+  if (!loadingfix){
+    if (class(loadinglowerH) != "numeric"){ 
+      stop("Input (loadinglowerH) is of wrong class") 
+    }
+    if (length(loadinglowerH) != 1){ 
+      stop("Length input (loadinglowerH) must be one") 
+    }
+    if (class(loadingupperH) != "numeric"){ 
+      stop("Input (loadingupperH) is of wrong class") 
+    }
+    if (length(loadingupperH) != 1){ 
+      stop("Length input (loadingupperH) must be one") 
+    }
+    if (!simplestructure){
+      if (class(loadinglowerL) != "numeric"){ 
+        stop("Input (loadinglowerL) is of wrong class") 
+      }
+      if (length(loadinglowerL) != 1){ 
+        stop("Length input (loadinglowerL) must be one") 
+      }
+      if (class(loadingupperL) != "numeric"){ 
+        stop("Input (loadingupperL) is of wrong class") 
+      }
+      if (length(loadingupperL) != 1){ 
+        stop("Length input (loadingupperL) must be one") 
+      }
+    }
+  }
+  if (!balanced){
+    if (class(numloadings) != "numeric" & class(numloadings) != "integer"){
+      stop("Input (numloadings) is of wrong class") 
+    }
+    if (length(numloadings) != m){
+      stop("Length of input (numloadings) should equal argument m") 
+    }
+    if (sum(numloadings) != p){
+      stop("Sum of inputs (numloadings) should equal argument p") 
+    }
+  }
+  
+  # Loadings matrix
+  Lambda <- matrix(0,p,m)
+  if (balanced){
+    h   <- floor(p/m)
+    hi1 <- 1 - h
+    hi2 <- 0
+    for (i in 1:m){
+      hi1 <- hi1 + h
+      hi2 <- hi2 + h
+      if (loadingfix){
+        Lambda[(hi1):(hi2),i] <- loadingvalue
+      }
+      if (!loadingfix){
+        Lambda[(hi1):(hi2),i] <- 
+          runif(length((hi1):(hi2)), 
+                min = loadinglowerH, 
+                max = loadingupperH)
+      }
+      if (loadingnegative){
+        Polarity <- sign(runif(length((hi1):(hi2)), min = -1, max = 1))
+        Lambda[(hi1):(hi2),i] <- Lambda[(hi1):(hi2),i] * Polarity
+      }
+    }
+    if (hi2 != p){
+      if (loadingfix){
+        Lambda[((hi2)+1):p,i] <- loadingvalue
+      }
+      if (!loadingfix){
+        Lambda[((hi2)+1):p,i] <-
+          runif(length(((hi2)+1):p), 
+                min = loadinglowerH, 
+                max = loadingupperH)
+      }
+    }
+    if (!simplestructure){
+      if (loadingfix){
+        if (loadingnegative){
+          Polarity <- sign(runif(length(Lambda[Lambda == 0]), min = -1, max = 1))
+          loadingvaluelow <- loadingvaluelow * Polarity
+        }
+        Lambda[Lambda == 0] <- loadingvaluelow
+      }
+      if (!loadingfix){
+        nbs <- runif(length(Lambda[Lambda == 0]), 
+                     min = loadinglowerL, 
+                     max = loadingupperL)
+        if (loadingnegative){
+          Polarity <- sign(runif(length(Lambda[Lambda == 0]), min = -1, max = 1))
+          nbs      <- nbs * Polarity
+        }
+        Lambda[Lambda == 0] <- nbs
+      }
+    }
+  }
+  if (!balanced){
+    low  <- cumsum(numloadings)
+    low  <- c(1,low[-length(low)] + 1)
+    high <- cumsum(numloadings)
+    for (i in 1:length(numloadings)){
+      if (loadingfix){
+        Lambda[low[i]:high[i],i] <- loadingvalue
+      }
+      if (!loadingfix){
+        Lambda[low[i]:high[i],i] <- 
+          runif(length(low[i]:high[i]), 
+                min = loadinglowerH, 
+                max = loadingupperH)
+      }
+      if (loadingnegative){
+        Polarity <- sign(runif(length(low[i]:high[i]), min = -1, max = 1))
+        Lambda[low[i]:high[i],i] <- Lambda[low[i]:high[i],i] * Polarity
+      }
+    }
+    if (!simplestructure){
+      if (loadingfix){
+        if (loadingnegative){
+          Polarity <- sign(runif(length(Lambda[Lambda == 0]), min = -1, max = 1))
+          loadingvaluelow <- loadingvaluelow * Polarity
+        }
+        Lambda[Lambda == 0] <- loadingvaluelow
+      }
+      if (!loadingfix){
+        nbs <- runif(length(Lambda[Lambda == 0]), 
+                     min = loadinglowerL, 
+                     max = loadingupperL)
+        if (loadingnegative){
+          Polarity <- sign(runif(length(Lambda[Lambda == 0]), min = -1, max = 1))
+          nbs      <- nbs * Polarity
+        }
+        Lambda[Lambda == 0] <- nbs
+      }
+    }
+  }
+  
+  # Uniqueness matrix
+  #Psi <- diag(p) - diag(diag(Lambda %*% t(Lambda)))
+  
+  # Making a random correlation matrix with dimension m x m
+   # when corr is a single value
+  
+  if (length(corr) == 1){
+    if(corr <= 1 & corr >= -1){
+      corr <- rep(corr, m * (m-1)/2)
+    }
+    else{
+      stop("corrs must be between -1 and 1 ")
+    } }
+  
+  # when there is only 1 factor
+  if (m == 1){
+    corr_mat <- matrix(1, nrow = 1)
+  }
+  
+  #corr is a matrix
+  
+  else if (is.matrix(corr)){
+  if (sum(corr == t(corr)) != length(corr)){
+    stop("corr must be symmetric")
+  }
+  else{
+    corr_mat <- corr
+  }
+  }
+  
+  
+  # when corr is a vector
+  else if (length(corr) == m^2){
+  corr_mat <- matrix(corr, nrow = m)
+  }
+  
+  else if (length(corr) == m*(m-1)/2){
+  corr_mat <- matrix(nrow = m, ncol = m)
+  upindex <- 1
+  lowindex <- 1
+  #up triangle matrix
+  for (col in 1:m){
+    for (row in 1:m){
+      if (col == row){
+        corr_mat[row, col] = 1
+      }
+      else if (col > row){
+        corr_mat[row, col] <- corr[upindex]
+        upindex <- upindex + 1
+      } 
+    }
+  }
+  
+  for (row in 1:m){
+    for (col in 1:m){
+      if (row > col){
+        corr_mat[row, col] = corr[lowindex]
+        lowindex <- lowindex + 1
+      }
+    } 
+  }
+  corr_mat 
+  
+  }
+
+  if (sum(eigen(corr_mat)$values < 0) >= 1){
+  stop("correlation matrix is not defined")
+}
+  
+ # Uniqueness matrix
+if (correlated){
+  Psi <- diag(p) - diag(diag(Lambda %*% corr_mat %*%t(Lambda)))
+}
+else{
+  Psi <- diag(p) - diag(diag(Lambda %*% t(Lambda)))
+}
+  
+  
+  # Generate data
+  
+  # specify if inserting Phi(correlation) or not
+  if (correlated){
+    SigmaModel <- Lambda %*% corr_mat %*% t(Lambda) + Psi
+    }
+  else{
+    SigmaModel <- Lambda %*%t(Lambda) + Psi
+    }
+  
+  
+  
+  SigmaModel <- Lambda %*% t(Lambda) + Psi
+  Scaling    <- diag(sqrt(1/diag(SigmaModel)))
+  SigmaModel <- Scaling %*% SigmaModel %*% Scaling
+  Data       <- mvrnorm(n = n, mu = rep(0,p), Sigma = SigmaModel, 
+                        tol = 1e-6, empirical = FALSE, EISPACK = FALSE)
+  
+  # Automatic naming of features
+  prefix         <- "feature"
+  suffix         <- seq(1:p)
+  colnames(Data) <- paste(prefix, suffix, sep = ".")
+  
+  # Return
+  data <- scale(Data)
+  return(list(data = data, loadings = Lambda, Phi = corr_mat,
+              Uniqueness = diag(Psi), cormatrix = cor(data)))
+}
+
+```
+
+
+## The MP law
+
+```{r}
+MP.Law <- function(n,p){ # p >> n
+  (1 + sqrt(p/n))^2
+  }
+```
+
+## define all the conditions
+```{r}
+#number of p (dimensions)
+p1 <- 200 # p = 200, p = 500, p = 1000, the new number of p
+p2 <- 500
+p3 <- 1000
+# number of m (factors)
+num_m <- c(5, 10, 20)
+#num_n <- c(100,500,1000)
+PhiH <- c(0.75, 0.80)#high correlation, have to keep the range small
+PhiL <- c(0.10, 0.30) #low correlation
+lambdaH <- c(0.75, 0.90)
+lambdaL <- c(0.60, 0.75)
+
+```
+
+
+## data generating function
+```{r}
+sim.dt <- function(num.p, num.m, n1=100, n2=500, n3=1000, t, phi,lambda, Cor=FALSE){
+  #length of the data list
+  len <- length(num.m)
+  dt_n1 <- vector(mode = "list", length = len)
+  dt_n2 <- vector(mode = "list", length = len)
+  dt_n3 <- vector(mode = "list", length = len)
+  
+  
+  for (l in 1:len){
+      dt_n1[[l]] <- replicate(t, FAsim_new(p = num.p , m = num.m[l], n =n1, balanced = TRUE,
+                                       correlated = Cor, loadingfix = FALSE, simplestructure =TRUE,
+                                       corr = runif(num.m[l]*(num.m[l]-1)/2, min = phi[1], max = phi[2]),
+                                       loadingvalue = .9, loadingvaluelow = .2,
+                                       loadinglowerL = .001, loadingupperL = .01,
+                                       loadinglowerH = lambda[1], loadingupperH = lambda[2]),
+                              simplify = FALSE)
+      
+      dt_n2[[l]] <- replicate(t, FAsim_new(p = num.p , m = num.m[l], n =n2, balanced = TRUE,
+                                       correlated = Cor, loadingfix = FALSE, simplestructure = TRUE,
+                                       corr = runif(num.m[l]*(num.m[l]-1)/2, min = phi[1], max = phi[2]),
+                                       loadingvalue = .9, loadingvaluelow = .2,
+                                       loadinglowerL = .001, loadingupperL = .01,
+                                       loadinglowerH = lambda[1], loadingupperH = lambda[2]),
+                              simplify = FALSE)
+      
+      dt_n3[[l]] <- replicate(t, FAsim_new(p = num.p , m = num.m[l], n =n3, balanced = TRUE,
+                                       correlated = Cor, loadingfix = FALSE, simplestructure = TRUE,
+                                       corr = runif(num.m[l]*(num.m[l]-1)/2, min = phi[1], max = phi[2]),
+                                       loadingvalue = .9, loadingvaluelow = .2,
+                                       loadinglowerL = .001, loadingupperL = .01,
+                                       loadinglowerH = lambda[1], loadingupperH = lambda[2]),
+                              simplify = FALSE)
+      
+  }
+  
+  
+  
+  #name the three data lists with different value of n
+  names(dt_n1) <- paste("m",num.m,"n", n1, sep = "")
+  names(dt_n2) <- paste("m",num.m,"n", n2, sep = "")
+  names(dt_n3) <- paste("m",num.m,"n", n3, sep = "")
+  return(list(dtN100 = dt_n1, dtN500 = dt_n2, dtN1000 = dt_n3))
+  
+  
+  }
+      
+```
+
+
+
+
+## factor extration function
+```{r}
+ factor.extract <- function(data,n1=100,n2=500,n3=1000, p, num_m){
+ 
+  
+  #eigenN100 <- lapply(data$dtN100, function(comb1){lapply(comb1,
+#function(d1){eigen(d1$cormatrix)$values})})
+
+  #eigenN500 <- lapply(data$dtN500, function(comb2){lapply(comb2,
+#function(d2){eigen(d2$cormatrix)$values})})
+  
+  #eigenN1000 <- lapply(data$dtN1000, function(comb3){lapply(comb3,
+#function(d3){eigen(d3$cormatrix)$values})})
+  
+   cormatN100 <- lapply(data$dtN100, function(comb11){lapply(comb11,
+function(d11){d11$cormatrix})})
+  
+  cormatN500 <- lapply(data$dtN500, function(comb22){lapply(comb22,
+function(d22){d22$cormatrix})})
+  
+  cormatN1000 <- lapply(data$dtN1000, function(comb33){lapply(comb33,
+function(d33){d33$cormatrix})})
+  
+   eigenN100 <- lapply(cormatN100, function(comb1){lapply(comb1,
+function(d1){eigen(d1)$values})})
+
+  eigenN500 <- lapply(cormatN500, function(comb2){lapply(comb2,
+function(d2){eigen(d2)$values})})
+  
+  eigenN1000 <- lapply(cormatN1000, function(comb3){lapply(comb3,
+function(d3){eigen(d3)$values})})
+  
+  
+  #Marchenko Pastur law bounds 
+  mpN100_bound <- MP.Law(n1,p)
+  mpN500_bound <- MP.Law(n2,p)
+  mpN1000_bound <- MP.Law(n3,p)
+  
+  # Marchenko Pastur factors
+  MP_fac1 <- as.data.frame(sapply(cormatN100, function(cor1){sapply(cor1, function(c1){sum(eigen(c1)$values >= mpN100_bound)})}))
+  
+  MP_fac2 <- as.data.frame(sapply(cormatN500, function(cor2){sapply(cor2, function(c2){sum(eigen(c2)$values >= mpN500_bound)})}))
+  
+  MP_fac3 <- as.data.frame(sapply(cormatN1000, function(cor3){sapply(cor3,function(c3){sum(eigen(c3)$values >= mpN1000_bound)})}))
+  
+  mp1 <- mapply(function(y,c)sum(y==c), MP_fac1,num_m)
+  mp2 <- mapply(function(y,c)sum(y==c), MP_fac2,num_m)
+  mp3 <- mapply(function(y,c)sum(y==c), MP_fac3,num_m)
+  
+  mp_correct <- rbind(mp1,mp2,mp3)
+  rownames(mp_correct) <- paste("n=", c(n1,n2,n3), sep = "")
+  colnames(mp_correct) <- paste("m=", num_m, sep = "")
+  
+  
+  #Kaiser's greater that one rule
+  KAI_fac1 <- as.data.frame(sapply(cormatN100, function(cor11){sapply(cor11, function(k1){sum(eigen(k1)$values >1)})}))
+  
+  KAI_fac2 <- as.data.frame(sapply(cormatN500, function(cor22){sapply(cor22, function(k2){sum(eigen(k2)$values >1)})}))
+  
+  KAI_fac3 <- as.data.frame(sapply(cormatN1000, function(cor33){sapply(cor33,function(k3){sum(eigen(k3)$values >1)})}))
+  
+  ka1 <- mapply(function(x,c)sum(x==c), KAI_fac1,num_m)
+  ka2 <- mapply(function(x,c)sum(x==c), KAI_fac2,num_m)
+  ka3 <- mapply(function(x,c)sum(x==c), KAI_fac3,num_m)
+  
+  ka_correct <- rbind(ka1,ka2,ka3)
+  rownames(ka_correct) <- paste("n=", c(n1,n2,n3), sep = "")
+  colnames(ka_correct) <- paste("m=", num_m, sep = "")
+  
+  
+  # eigenvalue ratios
+  eig_ratioN100 <- lapply(eigenN100, function(eig1){sapply(eig1, function(eg1){sapply(2:min(n1,p), function(i1){eg1[i1-1]/eg1[i1]})})})
+  
+  eig_ratioN500 <- lapply(eigenN500, function(eig2){sapply(eig2, function(eg2){sapply(2:min(n2,p), function(i2){eg2[i2-1]/eg2[i2]})})})
+  
+  eig_ratioN1000 <- lapply(eigenN1000, function(eig3){sapply(eig3, function(eg3){sapply(2:min(n3,p), function(i3){eg3[i3-1]/eg3[i3]})})})
+  
+  
+  #max eigenvalue rations
+  
+  max_N100 <- as.data.frame(sapply(eig_ratioN100, function(r1){apply(r1, 2, which.max)}))
+  max_N500 <- as.data.frame(sapply(eig_ratioN500, function(r2){apply(r2, 2, which.max)}))
+  max_N1000 <- as.data.frame(sapply(eig_ratioN1000, function(r3){apply(r3, 2, which.max)}))
+  
+  er1 <- mapply(function(r,e)sum(r==e), max_N100, num_m)
+  er2 <- mapply(function(r,e)sum(r==e), max_N500, num_m)
+  er3 <- mapply(function(r,e)sum(r==e), max_N1000, num_m)
+  
+  er_correct <- as.data.frame(rbind(er1, er2, er3))
+  rownames(er_correct) <- paste("n=", c(n1,n2,n3), sep = "")
+  colnames(er_correct) <- paste("m=", num_m, sep = "")
+ 
+  
+  #Empirical Kaiser Criterion
+  
+  EK_N100 <- as.data.frame(sapply(cormatN100, function(corr1){sapply(corr1, function(ek1){
+    EMPKC(ek1, Ncases = p, verbose = FALSE)$NfactorsEMPKC})}))
+  
+  EK_N500 <- as.data.frame(sapply(cormatN500, function(corr2){sapply(corr2, function(ek2){
+    EMPKC(ek2, Ncases = p, verbose = FALSE)$NfactorsEMPKC})}))
+  
+  EK_N1000 <- as.data.frame(sapply(cormatN1000, function(corr3){sapply(corr3, function(ek3){
+    EMPKC(ek3, Ncases = p, verbose = FALSE)$NfactorsEMPKC})}))
+  
+  EK1 <- mapply(function(e,k)sum(e==k), EK_N100, num_m)
+  EK2 <- mapply(function(e,k)sum(e==k), EK_N500, num_m)
+  EK3 <- mapply(function(e,k)sum(e==k), EK_N1000, num_m)
+  
+  EK_correct <- as.data.frame(rbind(EK1,EK2,EK3))
+  rownames(EK_correct) <- paste("n=", c(n1,n2,n3), sep = "")
+  colnames(EK_correct) <- paste("m=", num_m, sep = "")
+  
+  
+  #Growth ratio method
+  
+  GR_N100 <- lapply(eigenN100, function(eigen1){sapply(eigen1, function(e1){sapply(1:min(n1,p), function(j1){
+    log(1 + e1[j1]/sum(e1[(j1+1) : min(n1,p)])) / log(1 + e1[j1+1]/sum(e1[(j1+1+1) : min(n1,p)]))
+    })})})
+  
+  GR_N500 <- lapply(eigenN500, function(eigen2){sapply(eigen2, function(e2){sapply(1:min(n2,p), function(j2){
+    log(1 + e2[j2]/sum(e2[(j2+1) : min(n2,p)])) / log(1 + e2[j2+1]/sum(e2[(j2+1+1) : min(n2,p)]))
+    })})})
+  
+  GR_N1000 <- lapply(eigenN1000, function(eigen3){sapply(eigen3, function(e3){sapply(1:min(n3,p), function(j3){
+    log(1 + e3[j3]/sum(e3[(j3+1) : min(n3,p)])) / log(1 + e3[j3+1]/sum(e3[(j3+1+1) : min(n3,p)]))
+    })})})
+  
+  max_GRN100 <- as.data.frame(sapply(GR_N100, function(gr1){apply(gr1, 2, which.max)}))
+  max_GRN500 <- as.data.frame(sapply(GR_N500, function(gr2){apply(gr2, 2, which.max)}))
+  max_GRN1000 <- as.data.frame(sapply(GR_N1000, function(gr3){apply(gr3, 2, which.max)}))
+  
+  gr1 <- mapply(function(g,l)sum(g==l), max_GRN100, num_m)
+  gr2 <- mapply(function(g,l)sum(g==l), max_GRN500, num_m)
+  gr3 <- mapply(function(g,l)sum(g==l), max_GRN1000, num_m)
+  
+  gr_correct <- as.data.frame(rbind(gr1, gr2, gr3))
+  rownames(gr_correct) <- paste("n=", c(n1,n2,n3), sep = "")
+  colnames(gr_correct) <- paste("m=", num_m, sep = "")
+  
+  
+  return(list(
+    MP_N100 = MP_fac1, MP_N500 = MP_fac2, MP_N1000 = MP_fac3,
+    MP_Correct = as.data.frame(mp_correct),
+    
+    KAI_N100 = KAI_fac1, KAI_N500 = KAI_fac2, KAI_N1000 = KAI_fac3,
+    KAI_Correct= as.data.frame(ka_correct),
+    
+    EigR_N100 = max_N100, EigR_N500 = max_N500, EigR_N1000 = max_N1000,
+    EigR_Correct = er_correct,
+    
+    GR_N100 = max_GRN100, GR_N500 = max_GRN500, GR_N1000 = max_GRN1000, 
+    GR_Correct = gr_correct,
+    
+    EK_N100 = EK_N100, EK_N500 = EK_N500, EK_N1000 = EK_N1000, 
+    EK_Correct = EK_correct ))
+}
+
+
+#eigenN100 = eigenN100 , eigenN500 = eigenN500,eigenN1000 = eigenN1000,
+#mpN100_bound = mpN100_bound, mpN500_bound = mpN500_bound, mpN1000_bound = mpN1000_bound
+```
+
+## making long data
+```{r}
+df.long <- function(data){
+  df_MPN100 <- stack(data$MP_N100)
+  df_MPN500 <- stack(data$MP_N500)
+  df_MPN1000 <- stack(data$MP_N1000)
+
+  df_EiN100 <- stack(data$EigR_N100)
+  df_EiN500 <- stack(data$EigR_N500)
+  df_EiN1000 <- stack(data$EigR_N1000)
+
+  df_KAN100 <- stack(data$KAI_N100)
+  df_KAN500 <- stack(data$KAI_N500)
+  df_KAN1000 <- stack(data$KAI_N1000)
+  
+  df_GRN100 <- stack(data$GR_N100)
+  df_GRN500 <- stack(data$GR_N500)
+  df_GRN1000 <- stack(data$GR_N1000)
+  
+  df_EKN100 <- stack(data$EK_N100)
+  df_EKN500 <- stack(data$EK_N500)
+  df_EKN1000 <- stack(data$EK_N1000)
+  
+  #combine small datasets for each method 
+  df_MP <- as.data.frame(rbind(df_MPN100, df_MPN500, df_MPN1000))
+  
+  df_MP <- df_MP |>
+    separate(ind, c("m_factors", "n_subjects"), "n") |>
+    mutate(method = "MP")
+
+  df_ER <- as.data.frame(rbind(df_EiN100, df_EiN500, df_EiN1000))
+ 
+  df_ER <- df_ER |>
+    separate(ind, c("m_factors", "n_subjects"), "n") |>
+    mutate(method = "EigRatio")
+
+  df_KAI <- as.data.frame(rbind(df_KAN100, df_KAN500, df_KAN1000))
+ 
+  df_KAI <- df_KAI |>
+    separate(ind, c("m_factors", "n_subjects"), "n") |>
+    mutate(method = "Kaiser")
+  
+  df_GR <- as.data.frame(rbind(df_GRN100, df_GRN500, df_GRN1000))
+  
+  df_GR <- df_GR |>
+    separate(ind, c("m_factors", "n_subjects"), "n") |>
+    mutate(method = "GrowthRatio")
+  
+  df_EK <- as.data.frame(rbind(df_EKN100, df_EKN500, df_EKN1000))
+  
+  df_EK <- df_EK |>
+    separate(ind, c("m_factors", "n_subjects"), "n") |>
+    mutate(method = "EmpKaiser")
+    
+  
+  df_long <- rbind(df_MP, df_ER, df_KAI, df_EK, df_GR)
+
+  df_long <- df_long |>
+    mutate(n_subjects = fct_inseq(n_subjects), method = fct_inorder(method), #m_estimates = fct_inseq(values), 
+           m_factors = factor(m_factors, levels = c("m5", "m10","m20")))
+  
+  return(df_long)
+  }
+```
+
+
+## factor estimation visualization function
+```{r}
+
+factor_visual <- function(df_long, color){
+  df_long |>
+  group_by(catg, m_factors, n_subjects, method) |>
+  count() |>
+    rename(Factor.counts = n) |>
+    ggballoonplot(x = "catg", y = "n_subjects", size = "Factor.counts", fill = "Factor.counts",
+                  facet.by = c("method","m_factors"), ggtheme = theme_bw()) +
+    #scale_x_discrete(limits = category) +
+    scale_fill_gradient(low = color[1], high = color[2]) +
+    geom_text(aes(label = Factor.counts), size = 2, color = "gray17") +
+    guides(color = guide_legend("Factor.counts"), fill = "none")
+  
+}
+
+
+
+```
+
+
+## simulating data and extracting factors
+
+### p = 200, PhiZERO, lambdaLOW
+```{r}
+p200cor0lamL <- sim.dt(num.p = p1, num.m = num_m, t = 100, phi = PhiL, lambda = lambdaL, Cor = FALSE)
+```
+
+
+```{r}
+
+
+#outs <- sapply(1:109, function(i){
+  #log(sum(eig[i:109])/sum(eig[(i+1):109]))/log(sum(eig[(i+1):109])/sum(eig[(i+2):109]))
+#})
+
+
+#outs1 <- sapply(1:length(eig), function(i1){
+  #log(1 + eig[i1]/sum(eig[(i1+1) : length(eig)])) / log(1 + eig[i1+1]/sum(eig[(i1+1+1) : length(eig)]))
+#})
+
+
+```
+
+
+
+
+```{r}
+n_fac_p200cor0lamL <- factor.extract(p200cor0lamL, p = p1, num_m = num_m)
+
+n_fac_p200cor0lamL$MP_Correct
+n_fac_p200cor0lamL$EigR_Correct
+n_fac_p200cor0lamL$KAI_Correct
+n_fac_p200cor0lamL$GR_Correct
+n_fac_p200cor0lamL$EK_Correct
+
+
+
+df_p200_1 <- df.long(n_fac_p200cor0lamL) |>
+  #group_by(method, m_factors, n_subjects) |>
+  #count(values) |>
+  #filter(m_factors == "m20") |>
+  #arrange(desc(n)) |>
+  mutate(
+    catg = case_when(
+      values == 5 ~ "5",
+      values == 9 ~ "9",
+      values == 10 ~ "10",
+      #values == 11 ~ "11",
+      values >= 11 & values <= 19 ~ "11 to 19",
+     
+      #values == 14 ~ "14",
+      #values == 15 ~ "15",
+      #values == 16 ~ "16",
+      #values == 17 ~ "17",
+      #values == 18 ~ "18",
+      #values == 19 ~ "19",
+      values == 20 ~ "20",
+      values > 20 & values <= 99 ~ "21 to 99"
+    )
+  ) |> mutate(catg = factor(catg, levels = c("5","9","10","11 to 19","20","21 to 99")))
+
+
+
+balloon_p200_1 <- factor_visual(df_p200_1, c("ghostwhite","skyblue2"))
+balloon_p200_1
+ggsave("balloon_p200_1_new.png", width = 12.5, height = 7.5)
+
+```
+
+
+
+### p = 200, PhiZERO, lambdaHIGH
+```{r}
+p200cor0lamH <- sim.dt(num.p = p1, num.m = num_m, t = 100, phi = PhiL, lambda = lambdaH, Cor = FALSE)
+```
+
+
+```{r}
+n_fac_p200cor0lamH <- factor.extract(p200cor0lamH, p = p1, num_m = num_m)
+
+
+n_fac_p200cor0lamH$MP_Correct
+n_fac_p200cor0lamH$KAI_Correct
+n_fac_p200cor0lamH$EigR_Correct
+n_fac_p200cor0lamH$GR_Correct
+n_fac_p200cor0lamH$EK_Correct
+
+
+
+
+df_p200_2 <- df.long(n_fac_p200cor0lamH) |>
+  #group_by(method, m_factors, n_subjects) |>
+  #count(values) |>
+  #filter(m_factors == "m20") |>
+  #arrange(desc(n)) |>
+   mutate(
+    catg = case_when(
+      values == 5 ~ "5",
+      #values == 9 ~ "9",
+      values == 10 ~ "10",
+      #values == 11 ~ "11",
+      values >=11 & values <= 16 ~ "11 to 16",
+     
+      #values == 14 ~ "14",
+      #values == 15 ~ "15",
+      #values == 16 ~ "16",
+      values == 17 ~ "17",
+      values == 18 ~ "18",
+      values == 19 ~ "19",
+      values == 20 ~ "20",
+      values > 20 & values <= 99 ~ "21 to 99"
+    )
+  ) |> mutate(catg = factor(catg, levels = c("5","10","11 to 16","17","18","19","20","21 to 99")))
+
+  
+
+
+balloon_p200_2 <- factor_visual(df_p200_2, c("ghostwhite","skyblue2"))
+balloon_p200_2
+ggsave("balloon_p200_2_new.png", width = 12.5, height = 7.5)
+```
+
+
+### p = 200, PhiLOW, lambdaLOW
+```{r}
+p200corLlamL <- sim.dt(num.p = p1, num.m = num_m, t = 100, phi = PhiL, lambda = lambdaL, Cor = TRUE)
+```
+
+
+```{r}
+n_fac_p200corLlamL <- factor.extract(p200corLlamL, p = p1, num_m = num_m)
+
+n_fac_p200corLlamL$MP_Correct
+n_fac_p200corLlamL$KAI_Correct
+n_fac_p200corLlamL$EigR_Correct
+n_fac_p200corLlamL$GR_Correct
+n_fac_p200corLlamL$EK_Correct
+
+
+
+
+df_p200_3 <- df.long(n_fac_p200corLlamL)|>
+  #group_by(method, m_factors, n_subjects) |>
+  #count(values) |>
+  #filter(m_factors == "m20") |>
+  #arrange(desc(n)) |>
+   mutate(
+    catg = case_when(
+      values == 5 ~ "5",
+      values == 9 ~ "9",
+      values == 10 ~ "10",
+      values == 11 ~ "11",
+      values >=12 & values <= 17 ~ "12 to 17",
+     
+      #values == 14 ~ "14",
+      #values == 15 ~ "15",
+      #values == 16 ~ "16",
+      #values == 17 ~ "17",
+      values == 18 ~ "18",
+      values == 19 ~ "19",
+      values == 20 ~ "20",
+      values > 20 & values <= 99 ~ "21 to 99"
+    )
+  ) |> mutate(catg = factor(catg, levels = c("5","9","10","11","12 to 17","18","19","20","21 to 99")))
+
+
+
+
+
+balloon_p200_3 <- factor_visual(df_p200_3,c("ghostwhite","skyblue2"))
+balloon_p200_3
+ggsave("balloon_p200_3_new.png", width = 12.5, height = 7.5)
+
+
+
+```
+
+
+### p=200, PhiLOW, lambdaHIGH
+```{r}
+p200corLlamH <- sim.dt(num.p = p1, num.m = num_m, t = 100, phi = PhiL, lambda = lambdaH, Cor = TRUE)
+```
+
+```{r}
+n_fac_p200corLlamH <- factor.extract(p200corLlamH, p = p1, num_m = num_m)
+
+n_fac_p200corLlamH$MP_Correct
+n_fac_p200corLlamH$KAI_Correct
+n_fac_p200corLlamH$EigR_Correct
+n_fac_p200corLlamH$GR_Correct
+n_fac_p200corLlamH$EK_Correct
+
+
+
+
+
+df_p200_4 <- df.long(n_fac_p200corLlamH) |>
+  #group_by(method, m_factors, n_subjects) |>
+  #count(values) |>
+  #filter(m_factors == "m20") |>
+  #arrange(desc(n)) |> 
+  mutate(
+    catg = case_when(
+      values == 5 ~ "5",
+      #values == 9 ~ "9",
+      values == 10 ~ "10",
+      #values == 11 ~ "11",
+      #values == 12 ~ "12",
+      #values == 13 ~ "13",
+      
+      values >=11 & values <= 16 ~ "11 to 16",
+     
+      #values == 14 ~ "14",
+      #values == 15 ~ "15",
+      #values >= 15 & values <= 19 ~ "15 to 19",
+      values == 17 ~ "17",
+      values == 18 ~ "18",
+      values == 19 ~ "19",
+      values == 20 ~ "20",
+      values > 20 & values <= 99 ~ "21 to 99"
+    )
+  ) |> mutate(catg = factor(catg, levels = c("5","10","11 to 16","17","18","19","20","21 to 99")))
+  
+  
+
+balloon_p200_4 <- factor_visual(df_p200_4, c("ghostwhite","skyblue2"))
+balloon_p200_4
+ggsave("balloon_p200_4_new.png", width = 12.5, height = 7.5)
+```
+
+### p = 200, PhiHIGH, lambdaLOW
+```{r}
+p200corHlamL <- sim.dt(num.p = p1, num.m = num_m, t = 100, phi = PhiH, lambda = lambdaL, Cor = TRUE)
+```
+
+```{r}
+n_fac_p200corHlamL <- factor.extract(p200corHlamL, p = p1, num_m = num_m)
+
+n_fac_p200corHlamL$MP_Correct
+n_fac_p200corHlamL$KAI_Correct
+n_fac_p200corHlamL$EigR_Correct
+n_fac_p200corHlamL$GR_Correct
+n_fac_p200corHlamL$EK_Correct
+
+df_p200_5 <- df.long(n_fac_p200corHlamL) |>
+  #group_by(method, m_factors, n_subjects) |>
+  #count(values) |>
+  #filter(m_factors == "m20") |>
+  #arrange(desc(n)) |> 
+  mutate(
+    catg = case_when(
+      values == 5 ~ "5",
+      values == 9 ~ "9",
+      values == 10 ~ "10",
+      #values == 11 ~ "11",
+      #values == 12 ~ "12",
+      #values == 13 ~ "13",
+      
+      values >=11 & values <= 16 ~ "11 to 16",
+     
+      #values == 14 ~ "14",
+      #values == 15 ~ "15",
+      #values == 16 ~ "16",
+      #values >= 17 & values <= 19 ~ "17 to 19",
+      values == 17 ~ "17",
+      values == 18 ~ "18",
+      values == 19 ~ "19",
+      values == 20 ~ "20",
+      values > 20 & values <= 99 ~ "21 to 99"
+    )
+  ) |> mutate(catg = factor(catg, levels = c("5","9","10","11 to 16","17","18","19","20","21 to 99")))
+  
+
+balloon_p200_5 <- factor_visual(df_p200_5, c("ghostwhite","skyblue2"))
+balloon_p200_5
+ggsave("balloon_p200_5_new.png", width = 12.5, height = 7.5)
+```
+
+### p = 200, PhiHIGH, lambdaHIGH
+```{r}
+p200corHlamH <- sim.dt(num.p = p1, num.m = num_m, t = 100, phi = PhiH, lambda = lambdaH, Cor = TRUE)
+```
+
+
+```{r}
+n_fac_p200corHlamH <- factor.extract(p200corHlamH,p = p1, num_m = num_m)
+
+n_fac_p200corHlamH$MP_Correct
+n_fac_p200corHlamH$KAI_Correct
+n_fac_p200corHlamH$EigR_Correct
+n_fac_p200corHlamH$GR_Correct
+n_fac_p200corHlamH$EK_Correct
+
+
+
+
+df_p200_6 <- df.long(n_fac_p200corHlamH) |>
+  #group_by(method, m_factors, n_subjects) |>
+  #count(values) |>
+  #filter(m_factors == "m10") |>
+  #arrange(desc(n)) |> 
+  mutate(
+    catg = case_when(
+      values == 5 ~ "5",
+      values == 9 ~ "9",
+      values == 10 ~ "10",
+      #values == 11 ~ "11",
+      #values == 12 ~ "12",
+      #values == 13 ~ "13",
+      
+      values >=11 & values <= 16 ~ "11 to 16",
+      
+      values == 17 ~ "17",
+      values == 18 ~ "18",
+      values == 19 ~ "19",
+      values == 20 ~ "20",
+      values > 20 & values <= 99 ~ "21 to 99"
+    )
+  ) |> mutate(catg = factor(catg, levels = c("5","9","10","11 to 16","17","18","19","20","21 to 99")))
+  
+
+balloon_p200_6 <- factor_visual(df_p200_6,c("ghostwhite","skyblue2"))
+balloon_p200_6
+ggsave("balloon_p200_6_new.png", width = 12.5, height = 7.5)
+```
+
+
+
+### p = 500, PhiZero, lambdaLOW
+```{r}
+p500cor0lamL <- sim.dt(num.p = p2, num.m = num_m, t = 100, phi = PhiL, lambda = lambdaL, Cor = FALSE)
+```
+
+
+```{r}
+n_fac_p500cor0lamL <- factor.extract(p500cor0lamL, p = p2, num_m = num_m)
+
+n_fac_p500cor0lamL$MP_Correct
+n_fac_p500cor0lamL$KAI_Correct
+n_fac_p500cor0lamL$EigR_Correct
+n_fac_p500cor0lamL$GR_Correct
+n_fac_p500cor0lamL$EK_Correct
+
+
+
+
+
+
+
+df_p500_1 <- df.long(n_fac_p500cor0lamL) |>
+  #group_by(method, m_factors, n_subjects) |>
+  #count(values) |>
+  #filter(m_factors == "m10") |>
+  #arrange(desc(n)) |> 
+  mutate(
+    catg = case_when(
+      values == 5 ~ "5",
+      values == 9 ~ "9",
+      values == 10 ~ "10",
+      #values == 11 ~ "11",
+      #values == 12 ~ "12",
+      #values == 13 ~ "13",
+      
+      values >=11 & values <= 16 ~ "11 to 16",
+     
+      #values == 14 ~ "14",
+      
+      #values == 15 ~ "15",
+      #values == 16 ~ "16",
+      #values >= 17 & values <= 19 ~ "17 to 19",
+      values == 17 ~ "17",
+      values == 18 ~ "18",
+      values == 19 ~ "19",
+      values == 20 ~ "20",
+      values >= 21 & values <= 99 ~ "21 to 99",
+      values >= 100 & values <= 499 ~ "100 to 499"
+    )
+  ) |> mutate(catg = factor(catg, levels = c("5","9","10","11 to 16","17","18","19","20","21 to 99","100 to 499")))
+  
+
+balloon_p500_1 <- factor_visual(df_p500_1, c("mintcream", "mediumseagreen"))
+balloon_p500_1
+ggsave("balloon_p500_1_new.png", width = 12.5, height = 7.5)
+```
+
+### p = 500, PhiZERO, lambdaHIGH
+```{r}
+p500cor0lamH <- sim.dt(num.p = p2, num.m = num_m, t = 100, phi = PhiL, lambda = lambdaH, Cor = FALSE)
+```
+
+
+```{r}
+n_fac_p500cor0lamH <- factor.extract(p500cor0lamH, p = p2, num_m = num_m)
+
+n_fac_p500cor0lamH$MP_Correct
+n_fac_p500cor0lamH$KAI_Correct
+n_fac_p500cor0lamH$EigR_Correct
+n_fac_p500cor0lamH$GR_Correct
+n_fac_p500cor0lamH$EK_Correct
+
+
+
+
+
+
+df_p500_2 <- df.long(n_fac_p500cor0lamH) |>
+  #group_by(method, m_factors, n_subjects) |>
+  #count(values) |>
+  #filter(m_factors == "m20") |>
+  #arrange(desc(n)) |> 
+  mutate(
+    catg = case_when(
+      values == 5 ~ "5",
+      values == 6 ~ "6",
+      values == 7 ~ "7",
+      values == 9 ~ "9",
+      values == 10 ~ "10",
+      values == 11 ~ "11",
+      #values == 12 ~ "12",
+      #values == 13 ~ "13",
+      
+      values >=12 & values <= 16 ~ "12 to 16",
+     
+      #values == 14 ~ "14",
+      
+      #values == 15 ~ "15",
+      #values == 16 ~ "16",
+      #values >= 17 & values <= 19 ~ "17 to 19",
+      values == 17 ~ "17",
+      values == 18 ~ "18",
+      values == 19 ~ "19",
+      values == 20 ~ "20",
+      values >= 21 & values <= 99 ~ "21 to 99",
+      values >= 100 & values <= 499 ~ "100 to 499"
+    )
+  ) |> mutate(catg = factor(catg, levels = c("5","6","7","9","10","11","12 to 16","17","18","19","20","21 to 99","100 to 499")))
+  
+  
+
+balloon_p500_2 <-factor_visual(df_p500_2, c("mintcream", "mediumseagreen"))
+balloon_p500_2
+ggsave("balloon_p500_2_new.png", width = 12.5, height = 7.5)
+```
+
+
+
+### p = 500, PhiLow, lambdaLow
+```{r}
+p500corLlamL <- sim.dt(num.p = p2, num.m = num_m, t = 100, phi = PhiL, lambda = lambdaL, Cor = TRUE)
+
+```
+
+
+```{r}
+n_fac_p500corLlamL <- factor.extract(p500corLlamL, p = p2, num_m = num_m)
+
+
+n_fac_p500corLlamL$MP_Correct
+n_fac_p500corLlamL$KAI_Correct
+n_fac_p500corLlamL$EigR_Correct
+n_fac_p500corLlamL$GR_Correct
+n_fac_p500corLlamL$EK_Correct
+
+
+
+
+
+
+df_p500_3 <- df.long(n_fac_p500corLlamL) |>
+  #group_by(method, m_factors, n_subjects) |>
+  #count(values) |>
+  #filter(m_factors == "m10") |>
+  #arrange(desc(n)) |> 
+  mutate(
+    catg = case_when(
+      values == 5 ~ "5",
+      #values == 6 ~ "6",
+      #values == 9 ~ "9",
+      values == 10 ~ "10",
+      values == 11 ~ "11",
+      values == 12 ~ "12",
+      values == 13 ~ "13",
+      
+      #values >=13 & values <= 16 ~ "13 to 16",
+     
+      values == 14 ~ "14",
+      
+      values == 15 ~ "15",
+      values == 16 ~ "16",
+      
+      values == 17 ~ "17",
+      values == 18 ~ "18",
+      values == 19 ~ "19",
+      values == 20 ~ "20",
+      values >= 21 & values <= 99 ~ "21 to 99",
+      values >= 100 & values <= 499 ~ "100 to 499"
+    )
+  ) |> mutate(catg = factor(catg, levels = c("5","10","11","12","13","14","15","16","17","18","19","20","21 to 99","100 to 499")))
+  
+
+
+balloon_p500_3 <- factor_visual(df_p500_3, c("mintcream", "mediumseagreen"))
+balloon_p500_3
+ggsave("balloon_p500_3_new.png", width = 12.5, height = 7.5)
+```
+
+
+
+
+### p = 500, PhiLOW, lambdaHIGH
+```{r}
+p500corLlamH <- sim.dt(num.p = p2, num.m = num_m, t = 100, phi = PhiL, lambda = lambdaH, Cor = TRUE)
+```
+
+
+
+```{r}
+n_fac_p500corLlamH <- factor.extract(p500corLlamH, p = p2, num_m = num_m)
+
+
+n_fac_p500corLlamH$MP_Correct
+n_fac_p500corLlamH$KAI_Correct
+n_fac_p500corLlamH$EigR_Correct
+n_fac_p500corLlamH$GR_Correct
+n_fac_p500corLlamH$EK_Correct
+
+
+
+
+df_p500_4 <- df.long(n_fac_p500corLlamH) |>
+  #group_by(method, m_factors, n_subjects) |>
+  #count(values) |>
+  #filter(m_factors == "m20") |>
+  #arrange(desc(n)) |> 
+  mutate(
+    catg = case_when(
+      values == 5 ~ "5",
+      values == 6 ~ "6",
+      #values == 9 ~ "9",
+      values == 10 ~ "10",
+      values == 11 ~ "11",
+      values == 12 ~ "12",
+      values == 13 ~ "13",
+      
+      #values >=13 & values <= 16 ~ "13 to 16",
+     
+      values == 14 ~ "14",
+      
+      values == 15 ~ "15",
+      values == 16 ~ "16",
+      #values >= 17 & values <= 19 ~ "17 to 19",
+      values == 17 ~ "17",
+      values == 18 ~ "18",
+      values == 19 ~ "19",
+      values == 20 ~ "20",
+      values >= 21 & values <= 99 ~ "21 to 99",
+      values >= 100 & values <= 499 ~ "100 to 499"
+    )
+  ) |> mutate(catg = factor(catg, levels = c("5","6","10","11","12","13","14","15","16","17","18","19","20","21 to 99","100 to 499")))
+  
+  
+
+balloon_p500_4 <- factor_visual(df_p500_4, c("mintcream", "mediumseagreen"))
+balloon_p500_4
+ggsave("balloon_p500_4_new.png", width = 12.5, height = 7.5)
+```
+
+
+### p = 500, PhiHIGH, lambdaLOW
+```{r}
+p500corHlamL <- sim.dt(num.p = p2, num.m = num_m, t = 100, phi = PhiH, lambda = lambdaL, Cor = TRUE)
+
+```
+
+```{r}
+n_fac_p500corHlamL <- factor.extract(p500corHlamL, p = p2, num_m = num_m)
+
+n_fac_p500corHlamL$MP_Correct
+n_fac_p500corHlamL$KAI_Correct
+n_fac_p500corHlamL$EigR_Correct
+n_fac_p500corHlamL$GR_Correct
+n_fac_p500corHlamL$EK_Correct
+
+
+
+
+df_p500_5 <- df.long(n_fac_p500corHlamL) |>
+  #group_by(method, m_factors, n_subjects) |>
+  #count(values) |>
+  #filter(m_factors == "m20") |>
+  #arrange(desc(n)) |> 
+  mutate(
+    catg = case_when(
+      values == 5 ~ "5",
+      #values == 6 ~ "6",
+      #values == 9 ~ "9",
+      values == 10 ~ "10",
+      values == 11 ~ "11",
+      values == 12 ~ "12",
+      #values == 13 ~ "13",
+      
+      values >=13 & values <= 16 ~ "13 to 16",
+     
+      #values == 14 ~ "14",
+      
+      #values == 15 ~ "15",
+      #values == 16 ~ "16",
+      values >= 17 & values <= 19 ~ "17 to 19",
+      #values == 17 ~ "17",
+      #values == 18 ~ "18",
+      #values == 19 ~ "19",
+      values == 20 ~ "20",
+      values >= 21 & values <= 99 ~ "21 to 99",
+      values >= 100 & values <= 499 ~ "100 to 499"
+    )
+  ) |> mutate(catg = factor(catg, levels = c("5","10","11","12","13 to 16","17 to 19","20","21 to 99","100 to 499")))
+
+  
+
+balloon_p500_5 <- factor_visual(df_p500_5, c("mintcream", "mediumseagreen"))
+balloon_p500_5
+ggsave("balloon_p500_5_new.png", width = 12.5, height = 7.5)
+```
+
+### p = 500, PhiHIGH, lambdaHIGH
+```{r}
+p500corHlamH <- sim.dt(num.p = p2, num.m = num_m, t = 100, phi = PhiH, lambda = lambdaH, Cor = TRUE)
+
+```
+
+
+```{r}
+n_fac_p500corHlamH <- factor.extract(p500corHlamH, p = p2,num_m = num_m)
+
+n_fac_p500corHlamH$MP_Correct
+n_fac_p500corHlamH$KAI_Correct
+n_fac_p500corHlamH$EigR_Correct
+n_fac_p500corHlamH$GR_Correct
+n_fac_p500corHlamH$EK_Correct
+
+
+
+
+
+
+df_p500_6 <- df.long(n_fac_p500corHlamH)|>
+  #group_by(method, m_factors, n_subjects) |>
+  #count(values) |>
+  #filter(m_factors == "m20") |>
+  #arrange(desc(n)) |> 
+  mutate(
+    catg = case_when(
+      values == 5 ~ "5",
+      values == 6 ~ "6",
+      values == 9 ~ "9",
+      values == 10 ~ "10",
+      values == 11 ~ "11",
+      values == 12 ~ "12",
+      #values == 13 ~ "13",
+      
+      values >=13 & values <= 16 ~ "13 to 16",
+     
+      #values == 14 ~ "14",
+      
+      #values == 15 ~ "15",
+      #values == 16 ~ "16",
+      #values >= 17 & values <= 19 ~ "17 to 19",
+      values == 17 ~ "17",
+      values == 18 ~ "18",
+      values == 19 ~ "19",
+      values == 20 ~ "20",
+      values >= 21 & values <= 99 ~ "21 to 99",
+      values >= 100 & values <= 499 ~ "100 to 499"
+    )
+  ) |> mutate(catg = factor(catg, levels = c("5","6","9","10","11","12","13 to 16","17","18","19","20","21 to 99","100 to 499")))
+  
+
+balloon_p500_6 <- factor_visual(df_p500_6, c("mintcream", "mediumseagreen"))
+balloon_p500_6
+ggsave("balloon_p500_6_new.png", width = 12.5, height = 7.5)
+```
+
+
+
+### p = 1000, PhiZERO, lambdaLOW
+```{r}
+p1000cor0lamL <- sim.dt(num.p = p3, num.m = num_m, t = 100, phi = PhiL, lambda = lambdaL, Cor = FALSE)
+
+```
+
+```{r}
+n_fac_p1000cor0lamL <- factor.extract(p1000cor0lamL, p = p3, num_m = num_m)
+
+
+n_fac_p1000cor0lamL$MP_Correct
+n_fac_p1000cor0lamL$KAI_Correct
+n_fac_p1000cor0lamL$EigR_Correct
+n_fac_p1000cor0lamL$GR_Correct
+n_fac_p1000cor0lamL$EK_Correct
+
+
+
+
+
+
+
+df_p1000_1 <- df.long(n_fac_p1000cor0lamL) |>
+  #group_by(method, m_factors, n_subjects) |>
+  #count(values) |>
+  #filter(m_factors == "m20") |>
+  #arrange(desc(n)) |>
+   mutate(
+    catg = case_when(
+      values == 5 ~ "5",
+      values == 10 ~ "10",
+      values == 15 ~ "15",
+      values == 16 ~ "16",
+      values == 17 ~ "17",
+      values == 18 ~ "18",
+      values == 19 ~ "19",
+      values == 20 ~ "20",
+      values > 20 & values <= 499 ~ "21 to 499",
+      values > 499 & values <=999 ~ "500 to 999"
+    )
+  ) |> mutate(catg = factor(catg, levels = c("5","10","15","16","17","18","19","20","21 to 499","500 to 999")))
+
+
+  
+
+
+balloon_p1000_1 <- factor_visual(df_p1000_1, c("ivory1", "palevioletred2"))
+balloon_p1000_1
+ggsave("balloon_p1000_1_new.png", width = 12.5, height = 7.5)
+```
+
+
+
+### p = 1000, PhiZERO, lambdaHIGH
+```{r}
+p1000cor0lamH <- sim.dt(num.p = p3, num.m = num_m, t = 100, phi = PhiL, lambda = lambdaH, Cor = FALSE)
+```
+
+
+
+```{r}
+n_fac_p1000cor0lamH <- factor.extract(p1000cor0lamH, p = p3, num_m = num_m)
+
+
+n_fac_p1000cor0lamH$MP_Correct
+n_fac_p1000cor0lamH$KAI_Correct
+n_fac_p1000cor0lamH$EigR_Correct
+n_fac_p1000cor0lamH$GR_Correct
+n_fac_p1000cor0lamH$EK_Correct
+
+
+
+
+df_p1000_2 <- df.long(n_fac_p1000cor0lamH)|>
+  #group_by(method, m_factors, n_subjects) |>
+  #count(values) |>
+  #filter(m_factors == "m20") |>
+  #arrange(desc(n)) |>
+  mutate(
+    catg = case_when(
+      values == 5 ~ "5",
+      values == 10 ~ "10",
+      values == 15 ~ "15",
+      values == 16 ~ "16",
+      values == 17 ~ "17",
+      values == 18 ~ "18",
+      values == 19 ~ "19",
+      values == 20 ~ "20",
+      values > 20 & values <= 499 ~ "21 to 499",
+      values > 499 & values <=999 ~ "500 to 999"
+    )
+  ) |> mutate(catg = factor(catg, levels = c("5","10","15","16","17","18","19","20","21 to 499","500 to 999")))
+
+  
+
+
+
+balloon_p1000_2 <- factor_visual(df_p1000_2, c("ivory1", "palevioletred2"))
+balloon_p1000_2
+ggsave("balloon_p1000_2_new.png", width = 12.5, height = 7.5)
+```
+
+
+
+
+### p=1000, PhiLOW, lambdaLOW
+```{r}
+p1000corLlamL <- sim.dt(num.p = p3, num.m = num_m, t = 100, phi = PhiL, lambda = lambdaL, Cor = TRUE)
+```
+
+
+```{r}
+n_fac_p1000corLlamL <- factor.extract(p1000corLlamL, p = p3, num_m = num_m)
+
+n_fac_p1000corLlamL$MP_Correct
+n_fac_p1000corLlamL$KAI_Correct
+n_fac_p1000corLlamL$EigR_Correct
+n_fac_p1000corLlamL$GR_Correct
+n_fac_p1000corLlamL$EK_Correct
+
+
+
+df_p1000_3 <- df.long(n_fac_p1000corLlamL) |>
+  #group_by(method, m_factors, n_subjects) |>
+  #count(values) |>
+  #filter(m_factors == "m10") |>
+  #arrange(desc(n)) |>
+  mutate(
+    catg = case_when(
+      values == 5 ~ "5",
+      values == 10 ~ "10",
+      values == 15 ~ "15",
+      values == 16 ~ "16",
+      values == 17 ~ "17",
+      values == 18 ~ "18",
+      values == 19 ~ "19",
+      values == 20 ~ "20",
+      values > 20 & values <= 499 ~ "21 to 499",
+      values > 499 & values <=999 ~ "500 to 999"
+    )
+  ) |> mutate(catg = factor(catg, levels = c("5","10","15","16","17","18","19","20","21 to 499","500 to 999")))
+  
+
+
+balloon_p1000_3 <- factor_visual(df_p1000_3,c("ivory1", "palevioletred2"))
+balloon_p1000_3
+ggsave("balloon_p1000_3_new.png", width = 12.5, height = 7.5)
+```
+
+
+### p = 1000, PhiLOW, lambdaHIGH
+
+```{r}
+p1000corLlamH <- sim.dt(num.p = p3, num.m = num_m, t = 100, phi = PhiL, lambda = lambdaH, Cor = TRUE)
+```
+
+```{r}
+n_fac_p1000corLlamH <- factor.extract(p1000corLlamH, p = p3, num_m = num_m)
+
+
+n_fac_p1000corLlamH$MP_Correct
+n_fac_p1000corLlamH$KAI_Correct
+n_fac_p1000corLlamH$EigR_Correct
+n_fac_p1000corLlamH$GR_Correct
+n_fac_p1000corLlamH$EK_Correct
+
+
+df_p1000_4 <- df.long(n_fac_p1000corLlamH) |>
+  #group_by(method, m_factors, n_subjects) |>
+  #count(values) |>
+  #filter(m_factors == "m20") |>
+  #arrange(desc(n)) |>
+  mutate(
+    catg = case_when(
+      values == 5 ~ "5",
+      values == 10 ~ "10",
+      values == 15 ~ "15",
+      values == 16 ~ "16",
+      values == 17 ~ "17",
+      values == 18 ~ "18",
+      values == 19 ~ "19",
+      values == 20 ~ "20",
+      values > 20 & values <= 499 ~ "21 to 499",
+      values > 499 & values <=999 ~ "500 to 999"
+    )
+  ) |> mutate(catg = factor(catg, levels = c("5","10","15","16","17","18","19","20","21 to 499","500 to 999")))
+  
+
+balloon_p1000_4 <- factor_visual(df_p1000_4, c("ivory1", "palevioletred2"))
+balloon_p1000_4
+ggsave("balloon_p1000_4_new.png", width = 12.5, height = 7.5)
+```
+
+
+
+
+### p = 1000, PhiHIGH, lambdaLOW
+```{r}
+p1000corHlamL <- sim.dt(num.p = p3, num.m = num_m, t = 100, phi = PhiH, lambda = lambdaL, Cor = TRUE)
+```
+
+```{r}
+n_fac_p1000corHlamL <- factor.extract(p1000corHlamL, p = p3, num_m = num_m)
+
+n_fac_p1000corHlamL$MP_Correct
+n_fac_p1000corHlamL$KAI_Correct
+n_fac_p1000corHlamL$EigR_Correct
+n_fac_p1000corHlamL$GR_Correct
+n_fac_p1000corHlamL$EK_Correct
+
+
+
+df_p1000_5 <- df.long(n_fac_p1000corHlamL) |>
+  #group_by(method, m_factors, n_subjects) |>
+  #count(values) |>
+  #filter(m_factors == "m20") |>
+  #arrange(desc(n)) |>
+   mutate(
+    catg = case_when(
+      values == 5 ~ "5",
+      values == 10 ~ "10",
+      values == 15 ~ "15",
+      values == 16 ~ "16",
+      values == 17 ~ "17",
+      values == 18 ~ "18",
+      values == 19 ~ "19",
+      values == 20 ~ "20",
+      values > 20 & values <= 499 ~ "21 to 499",
+      values > 499 & values <=999 ~ "500 to 999"
+    )
+  )|> mutate(catg = factor(catg, levels = c("5","10","15","16","17","18","19","20","21 to 499","500 to 999"))) 
+
+  
+
+
+
+balloon_p1000_5 <- factor_visual(df_p1000_5, c("ivory", "palevioletred2"))
+balloon_p1000_5
+ggsave("balloon_p1000_5_new.png", width = 12.5, height = 7.5)
+  
+
+```
+
+
+
+### p = 1000, PhiHIGH, lambdaHIGH
+```{r}
+p1000corHlamH <- sim.dt(num.p = p3, num.m = num_m, t = 100, phi = PhiH, lambda = lambdaH, Cor = TRUE)
+
+```
+
+
+```{r}
+n_fac_p1000corHlamH <- factor.extract(p1000corHlamH, p = p3, num_m = num_m)
+
+n_fac_p1000corHlamH$MP_Correct
+n_fac_p1000corHlamH$KAI_Correct
+n_fac_p1000corHlamH$EigR_Correct
+n_fac_p1000corHlamH$GR_Correct
+n_fac_p1000corHlamH$EK_Correct
+
+
+
+df_p1000_6 <- df.long(n_fac_p1000corHlamH) |>
+  #group_by(method, m_factors, n_subjects) |>
+  #count(values) |>
+  #filter(m_factors == "m20") |>
+  #arrange(desc(n)) |>
+  mutate(
+    catg = case_when(
+      values == 5 ~ "5",
+      values == 10 ~ "10",
+      values == 15 ~ "15",
+      values == 16 ~ "16",
+      values == 17 ~ "17",
+      values == 18 ~ "18",
+      values == 19 ~ "19",
+      values == 20 ~ "20",
+      values > 20 & values <= 499 ~ "21 to 499",
+      values > 499 & values <=999 ~ "500 to 999"
+    )
+  )|> mutate(catg = factor(catg, levels = c("5","10","15","16","17","18","19","20","21 to 499","500 to 999"))) 
+
+  
+
+
+
+  
+
+balloon_p1000_6 <- factor_visual(df_p1000_6, c("ivory", "palevioletred2"))
+balloon_p1000_6
+ggsave("balloon_p1000_6_new.png", width = 12.5, height = 7.5)
+
+
+```
+
+
+
+
+
+
+
+# real data illustration
+```{r}
+#library(devtools)
+#install_github('ramhiser/datamicroarray')
+```
+
+
+###khan SRBCTs data
+
+```{r}
+data("khan")
+
+cor_khan <- cor(khan$x)
+
+svd_khan <- svd(cor_khan)
+
+eigen_khan <- eigen(cor_khan)
+
+```
+
+## real data illustrations
+```{r}
+#function to extract latent factors from the 5 methods
+realcase.factor <- function(data){
+  d.n <- dim(data)[1]
+  d.p <- dim(data)[2]
+  corrmat <- cor(data)
+  eigval <- eigen(corrmat)$values
+  kaiser <- sum(eigval > 1)
+  MP <- sum(eigval > MP.Law(n = d.n, p = d.p))
+  EigRatio <- which.max(sapply(2:min(d.n, d.p), function(i){eigval[i-1]/eigval[i]}))
+  EKC <- EMPKC(corrmat, Ncases = d.p, verbose = FALSE)$NfactorsEMPKC
+  GrowthRatio <- which.max(sapply(1:min(d.n, d.p), function(j){
+   log(1 + eigval[j]/sum(eigval[(j+1) : min(d.n,d.p)])) / log(1 + eigval[j+1]/sum(eigval[(j+1+1) : min(d.n,d.p)]))
+  }))
+  
+  return(list(n.fac.MP = MP, n.fac.kaiser = kaiser, n.fac.EigRatio = EigRatio, n.fac.EKC = EKC, n.fac.GrowthRatio = GrowthRatio))
+  
+}
+```
+
+```{r}
+realcase.factor(khan$x)
+```
+
+```{r}
+# follow the method of factor analysis
+# first step: filtering redundant correlation matrix
+cor_khan <- cor(khan$x)
+cor_khan[1:3, 1:3]
+#RF(cor_khan, t = 0.95)
+khan_subset <- subSet(khan$x, RF(cor_khan, t = 0.95))
+dim(khan_subset) #2307 features remain
+
+
+
+# find optimal regularized penalty
+opt_khan <- regcor(khan_subset, fold = 5)
+
+opt_khan$optPen
+dim(opt_khan$optCor)
+
+
+dimGB(opt_khan$optCor)
+
+sum(eigen_khan$values[1:1])/sum(eigen_khan$values)
+sum(eigen_khan$values[1:11])/sum(eigen_khan$values)
+
+```
+
+
+```{r}
+khan_fa <- mlFA(R = opt_khan$optCor, m = 11)
+```
+
+
+```{r}
+khan_fa$Loadings
+print(khan_fa$Loadings, digits = 2, cutoff = .3, sort = TRUE)
+```
+
+
+
+### radiomics data
+```{r}
+#load data
+load("AnonymousRadio.Rdata")
+
+## Look at radiomic measurements
+exprs(AnonymousRadio)
+
+## Clinical (sample) information
+pData(AnonymousRadio)
+
+```
+```{r}
+radiomics <- scale(t(exprs(AnonymousRadio)))
+dim(radiomics)
+cor_radiomics <- cor(radiomics)
+radioHeat(cor_radiomics, diag = FALSE, 
+          threshold = TRUE, 
+          threshvalue = .95,
+          labelsize = .01)
+```
+
+
+
+
+```{r}
+realcase.factor(radiomics)
+
+```
+
+```{r}
+radiomics_subset <- subSet(radiomics, RF(cor_radiomics, t = 0.95))
+
+dim(radiomics_subset)
+```
+
+```{r}
+opt_radiomics <- regcor(radiomics_subset, fold = 5)
+
+opt_radiomics$optPen
+opt_radiomics$optCor
+
+radiomics_fa <- mlFA(opt_radiomics$optCor, m = 7)
+radiomics_fa$Loadings
+print(radiomics_fa$Loadings, digits = 2, cutoff = .3, sort = TRUE)
+```
+
+```{r}
+radiomics_fa2 <- mlFA(opt_radiomics$optCor, m = 9)
+print(radiomics_fa2$Loadings, digits = 2, cutoff = .3, sort = TRUE)
+```
+
+
+```{r}
+#(density(n_fac_p1000corHlamH$eigenN100$m5n100[[1]]))
+plot(n_fac_p1000corHlamH$eigenN500$m5n500[[1]], col= 6, pch = 16, type = "b")
+#points(n_fac_p1000corHlamH$eigenN1000$m5n1000[[1]], col = 3, pch = 16, type = "b")
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
